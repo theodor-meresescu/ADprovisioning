@@ -1,5 +1,21 @@
 ﻿Set-ExecutionPolicy -ExecutionPolicy RemoteSigned
 
+class User {
+    [string] $sAMAccountName
+    [string] $Domain
+    [string] $fullName
+    [string] $Email
+    
+    User($samid, $name, $email, $domain) {
+        $this.sAMAccountName = $samid
+        $this.Domain = $domain
+        $this.fullName = $name
+        $this.Email = $email
+        
+        $this | Add-Member -MemberType ScriptMethod -Name "UPN" -Value { $this.sAMAccountName + "@" + $this.Domain }
+    }
+}
+
 class Stage {
     [string] $Name
     hidden [DateTime] $StartTime = [DateTime]::Now
@@ -175,7 +191,7 @@ class UpdateDb : Stage {
 
 class UserFactory {
 
-    [System.Collections.Generic.List[System.Object]] $Users
+    [System.Collections.Generic.List[User]] $Users
 
     hidden [array] $Result = @()
     hidden [DateTime] $StartTime = [DateTime]::Now
