@@ -1,4 +1,4 @@
-﻿Set-ExecutionPolicy RemoteSigned
+﻿Set-ExecutionPolicy -ExecutionPolicy RemoteSigned
 
 class Stage {
     [string] $Name
@@ -29,18 +29,22 @@ class Create : Stage {
         $name = $user.Name
         $mail = $user.Email
         $UPN = $user.UPN
+        $givenName = $name.Split(" ")[0]
+        $surName = $name.Split(" ")[-1]
 
         try {
-            New-ADUser -Name "$sAMAccountName" -DisplayName "$name" -GivenName $name.Split(" ")[0] -Surname $name.Split(" ")[-1] -EmailAddress $mail -SamAccountName $sAMAccountName -UserPrincipalName $UPN -Path "OU=_RootOU,DC=blah,DC=org" -AccountPassword(ConvertTo-SecureString $randomPassword -asplaintext -force) -Description "Auto-provisioned user." -Enabled $true
+            New-ADUser -Name "$sAMAccountName" -DisplayName "$name" -GivenName "$givenName" -Surname "$surName" -EmailAddress $mail -SamAccountName $sAMAccountName -UserPrincipalName $UPN -Path "OU=_RootOU,DC=blah,DC=org" -AccountPassword(ConvertTo-SecureString $randomPassword -asplaintext -force) -Description "Auto-provisioned user." -Enabled $true
              
-            $user | Add-Member -NotePropertyMembers @{ProvisioningStatus="0";ProvisioningMessage="Created"} -PassThru
+            $user | Add-Member -NotePropertyMembers @{ProvisioningStatus="0"
+                    ProvisioningMessage="Created"} -PassThru
         }
         catch {
             $ErrorMessage = $Error[0].Exception[0].Message
             $ErrorTargetObject = $Error[0].TargetObject
             $ErrorCode = $Error[0].Exception[0].ErrorCode
 
-            $user | Add-Member -NotePropertyMembers @{ProvisioningStatus="$ErrorCode";ProvisioningMessage="$ErrorMessage : $ErrorTargetObject"} -PassThru
+            $user | Add-Member -NotePropertyMembers @{ProvisioningStatus="$ErrorCode"
+                    ProvisioningMessage="$ErrorMessage : $ErrorTargetObject"} -PassThru
         }
        
         return $user
@@ -121,13 +125,13 @@ class SendEmail : Stage {
 class UpdateDb : Stage {
     UpdateDb () : base('Updating database') { }
 
-    hidden [string] $connectionString = "”
+    hidden [string] $connectionString = ""
 
     [System.Data.SqlClient.SqlConnection] $Connection = [System.Data.SqlClient.SqlConnection]::new($this.connectionString)
 
     [string] UpdateUserStatus($ProvisionedUsers) {
 
-        $sb = [System.Text.StringBuilder]::new()
+        $sb = [Text.StringBuilder]::new()
         [void]$sb.AppendLine("MERGE INTO AD_Batch_Provisioning")
         [void]$sb.AppendLine("USING (")
         [void]$sb.Append("VALUES ")
@@ -146,23 +150,22 @@ class UpdateDb : Stage {
         [void]$sb.AppendLine("WHEN MATCHED THEN")
         [void]$sb.AppendLine("UPDATE SET ProvisioningStatus = source.ProvisioningStatus, ProvisioningMessage = source.ProvisioningMessage;")
     
-        [String] $UserSqlQuery = $sb.ToString()
 
-        return $UserSqlQuery
+        return $sb.ToString()
     }
 
     [System.Object] Invoke([UserFactory]$Job) {
 
-        [string] $UserSqlQuery = UpdateUserStatus($Job.Users)
+        [string] $userUpdateQuery = UpdateUserStatus($Job.Users)
 
         $this.Connection.Open()
 
         $command = $this.Connection.CreateCommand()
-        $command.CommandText = $UserSqlQuery
+        $command.CommandText = $userUpdateQuery
 
-        $users = $command.ExecuteReader()
+        $command.ExecuteReader()
 
-        $this.Connection.Close();
+        $this.Connection.Close()
 
         $Job.LogEntry("[in {0:N2}s]" -f $this.GetElapsed().TotalSeconds)
 
@@ -176,7 +179,7 @@ class UserFactory {
 
     hidden [array] $Result = @()
     hidden [DateTime] $StartTime = [DateTime]::Now
-    hidden [Stage[]] $Stages = @()
+    hidden [System.Collections.Generic.List[Stage]] $Stages
 
     UserFactory ($toProvision) {
         $this.Users = $toProvision
@@ -199,7 +202,7 @@ class UserFactory {
     }
 
     [UserFactory] AddStage([Stage]$S) {
-        $this.Stages += $S
+        $this.Stages.Add($S)
 
         return $this
     }
@@ -223,74 +226,8 @@ class UserFactory {
     }
 }
 
-
-class Provision : System.IDisposable {
-
-    hidden [string] $connectionString = "”
-
-    [System.Data.SqlClient.SqlConnection] $Connection = [System.Data.SqlClient.SqlConnection]::New($this.connectionString)
-
-    [System.Collections.Generic.List[System.Object]] $ToProvision
-
-
-    [System.Collections.Generic.List[System.Object]] GetRawUnprovisionedUsers() {
-
-        $users = New-Object System.Collections.Generic.List[System.Object]
-
-        $batchSize = 5
-
-        [String] $UserSqlQuery = "SELECT * FROM [dbo].[AD_Batch_Provisioning] WHERE provisioning_status IS NULL ORDER BY DateTime DESC LIMIT $batchSize"
-
-        $Command = $this.Connection.CreateCommand()
-        $Command.CommandText = $UserSqlQuery
-
-        $users = $Command.ExecuteReader()
-
-        return $users
-    }
-
-    Provision() {
-        $this.Connection.Open()
-
-        $rawUsers = $this.GetRawUnprovisionedUsers()
-
-        $rawUsers | ForEach-Object {
-
-            $user = @{ sAMAccount = $_[1];
-            Domain = $_[2];
-            Name = $_[3];
-            Email = $_[4];
-            UPN = $this.sAMAccount + "@" + $this.Domain }
-
-            $this.ToProvision.Add($user)
-
-            }
-
-        $this.Connection.Close()
-
-        [UserFactory]::New($this.ToProvision, $this.Connection)
-        .AddStage([Create]::New())
-        .AddStage([UpdateGroup]::New())
-        .AddStage([SendEmail]::New())
-        .AddStage([UpdateDb]::New()).Invoke().GetResult()
-
-    }
-
-    [void] Dispose() { 
-        $this.Disposing = $true
-        $this.Dispose($true)
-        [System.GC]::SuppressFinalize($this)
-    }
-
-    [void] Dispose([bool]$disposing) { 
-        if($disposing)
-        { 
-            $this.Connection.Dispose()
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($this.Connection)
-        }
-    }
-    
-}
-
-
-[Provision]::New()
+[UserFactory]::New($this.ToProvision)
+.AddStage([Create]::New())
+.AddStage([UpdateGroup]::New())
+.AddStage([SendEmail]::New())
+.AddStage([UpdateDb]::New()).Invoke().GetResult()
