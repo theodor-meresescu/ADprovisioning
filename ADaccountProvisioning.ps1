@@ -3,16 +3,16 @@
 class User {
     [string] $sAMAccountName
     [string] $Domain
-    [string] $fullName
-    [string] $Email
+    [string] $altEmail
     
-    User($samid, $name, $email, $domain) {
+    User($samid, $name, $email, $domain, $path) {
         $this.sAMAccountName = $samid
         $this.Domain = $domain
-        $this.fullName = $name
-        $this.Email = $email
+        $this.altEmail = $email
         
         $this | Add-Member -MemberType ScriptMethod -Name "UPN" -Value { $this.sAMAccountName + "@" + $this.Domain }
+        $this | Add-Member -MemberType ScriptMethod -Name "GivenName" -Value { $name.Split(" ")[0] }
+        $this | Add-Member -MemberType ScriptMethod -Name "Surname" -Value { $name.Split(" ")[-1] }
     }
 }
 
@@ -36,14 +36,18 @@ class Stage {
 class Create : Stage {
 
     Create () : base('Creating user') { }
+    
+    [string] GenerateRandom([int]$count) {
+        return (-join ((65..90) + (97..122) + (35..38) | Get-Random -Count $count | % {[char]$_}))
+    }
 
-    [System.Object] CreateUser($user) {
+    [System.Object] CreateUser([User]$user) {
 
-        $randomPassword = (-join ((65..90) + (97..122) + (34..56) | Get-Random -Count 12 | % {[char]$_}))
+        $randomPassword = GenerateRandom(12)
         
         $sAMAccountName = $user.sAMAccountName
-        $name = $user.Name
-        $mail = $user.Email
+        $name = $user.fullName
+        $mail = $user.altEmail
         $UPN = $user.UPN
         $givenName = $name.Split(" ")[0]
         $surName = $name.Split(" ")[-1]
